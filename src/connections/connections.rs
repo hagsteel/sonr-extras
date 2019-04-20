@@ -29,22 +29,22 @@ impl<T: StreamRef> Connections<T> {
         self.reactors.insert(reactor.token(), reactor);
     }
 
-    pub fn react(&mut self, reaction: Reaction<T>) -> Option<&mut T> {
+    pub fn react(&mut self, reaction: Reaction<T>) -> Reaction<&mut T> {
         use Reaction::*;
         match reaction {
             Value(reactor) => {
                 self.reactors.insert(reactor.token(), reactor);
-                None
+                Continue
             }
             Event(event) => {
                 if let Some(reactor) = self.reactors.get_mut(&event.token()) {
                     reactor.stream_mut().react(event.into());
-                    Some(reactor)
+                    Value(reactor)
                 } else {
-                    None
+                    event.into()
                 }
             }
-            Continue => None,
+            Continue => Continue,
         }
     }
 }
