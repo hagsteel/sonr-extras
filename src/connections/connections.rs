@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::collections::hash_map::IterMut;
+use std::collections::HashMap;
 
 use sonr::net::stream::StreamRef;
 use sonr::prelude::*;
@@ -29,7 +29,8 @@ impl<T: StreamRef> Connections<T> {
         self.reactors.insert(reactor.token(), reactor);
     }
 
-    pub fn react(&mut self, reaction: Reaction<T>) -> Reaction<&mut T> {
+    /// Returns a reference and isn't a real reactor
+    pub fn inner_react(&mut self, reaction: Reaction<T>) -> Reaction<&mut T> {
         use Reaction::*;
         match reaction {
             Value(reactor) => {
@@ -48,4 +49,3 @@ impl<T: StreamRef> Connections<T> {
         }
     }
 }
-
