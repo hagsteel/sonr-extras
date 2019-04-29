@@ -1,7 +1,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use sonr::net::stream::{Stream, StreamRef};
 use sonr::reactor::{Reaction, Reactor};
-use std::io::{Result, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Result, Write};
 
 use crate::codecs::Codec;
 
@@ -10,33 +10,42 @@ pub struct Connection<T: StreamRef, C: Codec> {
     codec: C,
     read_buffer: BytesMut,
     write_buffer: BytesMut,
+    read_capacity: usize,
+    is_encoding: bool,
 }
 
 impl<T: StreamRef, C: Codec> Connection<T, C> {
-    pub fn new(stream: T, codec: C, read_cap: usize, write_cap: usize) -> Self {
+    pub fn new(stream: T, codec: C, read_capacity: usize, write_capacity: usize) -> Self {
         Self {
             stream,
             codec,
-            read_buffer: BytesMut::with_capacity(read_cap),
-            write_buffer: BytesMut::with_capacity(write_cap),
+            read_buffer: BytesMut::with_capacity(read_capacity),
+            write_buffer: BytesMut::with_capacity(write_capacity),
+            read_capacity,
+            is_encoding: false,
         }
     }
 
     pub fn recv(&mut self) -> Option<Result<Bytes>> {
+        if self.is_encoding {
+            match self.codec.decode(&mut self.read_buffer) {
+                Some(bytes) => return  Some(Ok(bytes)),
+                None => self.is_encoding = false,
+            }
+        }
+
         if !self.stream.stream_ref().readable() {
             return None;
         }
 
         let res = {
+            self.read_buffer.reserve(self.read_capacity);
             let mut b = unsafe { self.read_buffer.bytes_mut() };
             self.stream.stream_mut().read(&mut b)
         };
 
         match res {
-            // The connection was closed by the peer.
             Ok(0) => Some(Err(ErrorKind::ConnectionReset.into())),
-
-            // Try to decode messages from the read data
             Ok(n) => {
                 let buf_len = self.read_buffer.len() + n;
                 unsafe {
@@ -44,16 +53,14 @@ impl<T: StreamRef, C: Codec> Connection<T, C> {
                 }
 
                 match self.codec.decode(&mut self.read_buffer) {
-                    Some(bytes) => Some(Ok(bytes)),
+                    Some(bytes) => {
+                        self.is_encoding = true;
+                        Some(Ok(bytes))
+                    }
                     None => None,
                 }
             }
-
-            // Not an actual error
             Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
-
-            // Connection closed. Ignoring the reason
-            // for simplicity
             Err(e) => Some(Err(e)),
         }
     }
@@ -86,7 +93,6 @@ impl<T: StreamRef, C: Codec> Connection<T, C> {
             self.write_buffer.reserve(payload.len());
         }
         self.write_buffer.put_slice(&payload);
-
     }
 
     pub fn react(&mut self, reaction: Reaction<()>) -> Reaction<()> {
@@ -100,9 +106,8 @@ impl<T: StreamRef, C: Codec> StreamRef for Connection<T, C> {
     fn stream_ref(&self) -> &Stream<Self::Evented> {
         self.stream.stream_ref()
     }
-    
+
     fn stream_mut(&mut self) -> &mut Stream<Self::Evented> {
         self.stream.stream_mut()
     }
 }
-
