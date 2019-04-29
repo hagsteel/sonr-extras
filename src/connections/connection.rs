@@ -1,7 +1,7 @@
 use bytes::{BufMut, Bytes, BytesMut};
 use sonr::net::stream::{Stream, StreamRef};
 use sonr::reactor::{Reaction, Reactor};
-use std::io::{ErrorKind::WouldBlock, Read, Write};
+use std::io::{Result, ErrorKind, Read, Write};
 
 use crate::codecs::Codec;
 
@@ -22,7 +22,7 @@ impl<T: StreamRef, C: Codec> Connection<T, C> {
         }
     }
 
-    pub fn recv(&mut self) -> Option<Result<Bytes, ()>> {
+    pub fn recv(&mut self) -> Option<Result<Bytes>> {
         if !self.stream.stream_ref().readable() {
             return None;
         }
@@ -34,7 +34,7 @@ impl<T: StreamRef, C: Codec> Connection<T, C> {
 
         match res {
             // The connection was closed by the peer.
-            Ok(0) => Some(Err(())),
+            Ok(0) => Some(Err(ErrorKind::ConnectionReset.into())),
 
             // Try to decode messages from the read data
             Ok(n) => {
@@ -50,15 +50,15 @@ impl<T: StreamRef, C: Codec> Connection<T, C> {
             }
 
             // Not an actual error
-            Err(ref e) if e.kind() == WouldBlock => None,
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
 
             // Connection closed. Ignoring the reason
             // for simplicity
-            Err(_) => Some(Err(())),
+            Err(e) => Some(Err(e)),
         }
     }
 
-    pub fn write(&mut self) -> Option<Result<usize, ()>> {
+    pub fn write(&mut self) -> Option<Result<usize>> {
         if !self.stream.stream_ref().writable() {
             return None;
         }
@@ -72,8 +72,8 @@ impl<T: StreamRef, C: Codec> Connection<T, C> {
                 self.write_buffer.split_to(n); // Remove sent data
                 Some(Ok(n))
             }
-            Err(ref e) if e.kind() == WouldBlock => None,
-            Err(_) => Some(Err(())),
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => None,
+            Err(e) => Some(Err(e)),
         }
     }
 
